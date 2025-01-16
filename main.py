@@ -27,11 +27,6 @@ SERVO_FREQ = 50
 TILT_CH = 0
 PAN_CH = 1
 
-# Micrófono
-MIC_PIN = 34
-SOUND_THRESHOLD = 500
-WINDOW_SECONDS = 2.0
-
 # Modos
 MODE_CHILL = "Chill"
 MODE_BUSQUEDA = "Busqueda"
@@ -39,6 +34,13 @@ MODE_SEGUIMIENTO = "Seguimiento"
 
 current_mode = MODE_BUSQUEDA
 current_code = ""  # Código ingresado actualmente (máximo 4 dígitos)
+
+# Estado de movimiento
+movement_state = {
+    "step": 0,
+    "direction": 1,
+    "pattern": "none"
+}
 
 # Teclado matricial
 KEYPAD_ROWS = [26, 27, 14, 12]  # GPIOs para las filas
@@ -86,14 +88,23 @@ def set_servo(channel, angle):
     pwm_val = angle_to_pwm(angle)
     pca.set_pwm(channel, 0, pwm_val)
 
-mic_adc = ADC(Pin(MIC_PIN))
-mic_adc.atten(ADC.ATTN_11DB)
+def get_date_str():
+    y, m, d, _, _, _, _, _ = time.localtime(time.time() + TIME_OFFSET_HOURS * 3600)
+    return f"{d:02d}/{m:02d}/{y:04d}"
+
+def get_time_str():
+    _, _, _, hh, mm, _, _, _ = time.localtime(time.time() + TIME_OFFSET_HOURS * 3600)
+    suffix = "AM" if hh < 12 else "PM"
+    hh12 = hh % 12 if hh % 12 != 0 else 12
+    return f"{hh12:02d}:{mm:02d} {suffix}"
 
 def update_oled_with_code(code):
     oled.fill(0)
-    oled.text("MattosCam", 0, 16)
-    oled.text(f"Modo: {current_mode}", 0, 32)
-    oled.text(f"Codigo: {code}", 0, 48)
+    oled.text(get_date_str(), 20, 0)
+    oled.text("MattosCam", 0, 15)
+    oled.text(f"Modo: {current_mode}", 0, 27)
+    oled.text(f"Codigo: {code}", 0, 39)
+    oled.text(get_time_str(), 25, 55)
     oled.show()
 
 def read_keypad():
@@ -122,65 +133,39 @@ def process_key(key):
         current_code = ""
     elif key == 'A':
         current_mode = MODE_CHILL
+        movement_state.update({"pattern": "chill", "step": 0, "direction": 1})
     elif key == 'B':
         current_mode = MODE_BUSQUEDA
+        movement_state.update({"pattern": "busqueda", "step": 0, "direction": 1})
     elif key == 'C':
         current_mode = MODE_SEGUIMIENTO
+        movement_state.update({"pattern": "seguimiento", "step": 0, "direction": 1})
     elif key == 'D':
-        print("Láser encendido/apagado")
+        print("Laser encendido/apagado")
     update_oled_with_code(current_code)
 
-def detect_sound_once(threshold=SOUND_THRESHOLD, window=WINDOW_SECONDS):
-    start = time.time()
-    while (time.time() - start) < window:
-        val = mic_adc.read()
-        if val > threshold:
-            while mic_adc.read() > threshold:
-                time.sleep(0.01)
-            return True
-        time.sleep(0.01)
-    return False
-
-def do_chill():
-    for pan_ang in range(60, 121, 2):
-        tilt_ang = 90 + int(math.sin(pan_ang * math.pi / 30) * 10)
-        tilt_ang = max(80, min(100, tilt_ang))
+def move_pattern():
+    step = movement_state["step"]
+    direction = movement_state["direction"]
+    if movement_state["pattern"] == "chill":
+        tilt_ang = 90 + int(math.sin(step * math.pi / 30) * 10)
+        set_servo(PAN_CH, 60 + step)
+        set_servo(TILT_CH, tilt_ang)
+        movement_state["step"] += direction
+        if step >= 60 or step <= 0:
+            movement_state["direction"] *= -1
+    elif movement_state["pattern"] == "busqueda":
+        pan_ang = step % 180
+        tilt_ang = 60 if (step // 180) % 2 == 0 else 120
         set_servo(PAN_CH, pan_ang)
         set_servo(TILT_CH, tilt_ang)
-        time.sleep(0.05)
-    for pan_ang in range(120, 59, -2):
-        tilt_ang = 90 + int(math.sin(pan_ang * math.pi / 30) * 10)
-        tilt_ang = max(80, min(100, tilt_ang))
+        movement_state["step"] += 5
+    elif movement_state["pattern"] == "seguimiento":
+        pan_ang = 90 + int(math.sin(step * 0.1) * 30)
+        tilt_ang = 90 + int(math.cos(step * 0.1) * 20)
         set_servo(PAN_CH, pan_ang)
         set_servo(TILT_CH, tilt_ang)
-        time.sleep(0.05)
-
-def do_busqueda():
-    set_servo(PAN_CH, 90)
-    for t in range(60, 121, 5):
-        set_servo(TILT_CH, t)
-        time.sleep(0.03)
-    set_servo(TILT_CH, 90)
-    for p in range(0, 181, 5):
-        set_servo(PAN_CH, p)
-        time.sleep(0.03)
-    for deg in range(0, 360, 5):
-        r = math.radians(deg)
-        p = 90 + int(math.sin(r) * 30)
-        t = 90 + int(math.cos(r) * 30)
-        set_servo(PAN_CH, p)
-        set_servo(TILT_CH, t)
-        time.sleep(0.03)
-
-def do_seguimiento():
-    base_pan = 90
-    base_tilt = 90
-    for i in range(50):
-        off_p = int(math.sin(i * 0.2) * 10)
-        off_t = int(math.cos(i * 0.2) * 5)
-        set_servo(PAN_CH, base_pan + off_p)
-        set_servo(TILT_CH, base_tilt + off_t)
-        time.sleep(0.05)
+        movement_state["step"] += 5
 
 def main():
     global current_mode
@@ -192,12 +177,8 @@ def main():
         key = read_keypad()
         if key:
             process_key(key)
-        if current_mode == MODE_CHILL:
-            do_chill()
-        elif current_mode == MODE_BUSQUEDA:
-            do_busqueda()
-        elif current_mode == MODE_SEGUIMIENTO:
-            do_seguimiento()
+        move_pattern()
+        time.sleep(0.05)
 
 if __name__ == "__main__":
     main()
