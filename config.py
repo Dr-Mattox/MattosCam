@@ -1,0 +1,4 @@
+# config.py
+
+WIFI_SSID = "IZZI-C7C3"
+WIFI_PASS = "MISTIMIMOR1818"
