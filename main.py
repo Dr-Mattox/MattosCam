@@ -30,7 +30,7 @@ PAN_CH = 1
 # Modos
 MODE_CHILL = "Chill"
 MODE_BUSQUEDA = "Busqueda"
-MODE_SEGUIMIENTO = "Seguimiento"
+MODE_SEGUIR = "Seguir"
 
 current_mode = MODE_BUSQUEDA
 current_code = ""  # Código ingresado actualmente (máximo 4 dígitos)
@@ -138,34 +138,47 @@ def process_key(key):
         current_mode = MODE_BUSQUEDA
         movement_state.update({"pattern": "busqueda", "step": 0, "direction": 1})
     elif key == 'C':
-        current_mode = MODE_SEGUIMIENTO
-        movement_state.update({"pattern": "seguimiento", "step": 0, "direction": 1})
+        current_mode = MODE_SEGUIR
+        movement_state.update({"pattern": "seguir", "step": 0, "direction": 1})
     elif key == 'D':
-        print("Laser encendido/apagado")
+        print("Laser On/Off")
     update_oled_with_code(current_code)
 
 def move_pattern():
+    """
+    Ejecuta el patrón de movimiento según el modo seleccionado.
+    """
     step = movement_state["step"]
     direction = movement_state["direction"]
+
     if movement_state["pattern"] == "chill":
-        tilt_ang = 90 + int(math.sin(step * math.pi / 30) * 10)
-        set_servo(PAN_CH, 60 + step)
+        # Movimiento suave en tilt y pan
+        tilt_ang = 90 + int(math.sin(step * math.pi / 30) * 10)  # Oscilación de 80° a 100°
+        pan_ang = 90 + int(math.cos(step * math.pi / 30) * 15)   # Oscilación de 75° a 105°
+        set_servo(PAN_CH, pan_ang)
         set_servo(TILT_CH, tilt_ang)
+
+        # Actualizar step para el próximo movimiento
         movement_state["step"] += direction
-        if step >= 60 or step <= 0:
-            movement_state["direction"] *= -1
+        if movement_state["step"] >= 60 or movement_state["step"] <= 0:
+            movement_state["direction"] *= -1  # Cambiar dirección
+
     elif movement_state["pattern"] == "busqueda":
+        # Movimiento horizontal con alternancia en tilt
         pan_ang = step % 180
         tilt_ang = 60 if (step // 180) % 2 == 0 else 120
         set_servo(PAN_CH, pan_ang)
         set_servo(TILT_CH, tilt_ang)
         movement_state["step"] += 5
-    elif movement_state["pattern"] == "seguimiento":
+
+    elif movement_state["pattern"] == "seguir":
+        # Movimiento continuo en un patrón sinusoidal
         pan_ang = 90 + int(math.sin(step * 0.1) * 30)
         tilt_ang = 90 + int(math.cos(step * 0.1) * 20)
         set_servo(PAN_CH, pan_ang)
         set_servo(TILT_CH, tilt_ang)
         movement_state["step"] += 5
+
 
 def main():
     global current_mode
